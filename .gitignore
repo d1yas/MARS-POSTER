@@ -6,7 +6,8 @@ __pycache__/
 # C extensions
 *.so
 user_data.db
-
+bot_database.db
+venv
 # Distribution / packaging
 .Python
 build/
