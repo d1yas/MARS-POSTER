@@ -351,7 +351,7 @@ async def ask_for_elon_photo(message: types.Message):
     if not is_admin(message.from_user.id):
         return
         
-    await message.answer("📤 Iltimos, e'lon uchun rasm yuboring yoki kanaldan xabarni forward qiling:", reply_markup=btn_cancel)
+    await message.answer("📤 Iltimos, e'lon uchun rasm yuboring:", reply_markup=btn_cancel)
     await ElonState.photo.set()
 
 # ❌ Bekor qilish tugmasi bosilganda
