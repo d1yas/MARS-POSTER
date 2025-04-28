@@ -49,6 +49,13 @@ CREATE TABLE IF NOT EXISTS content_posts (
 )
 """)
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS post_history (
+    post_id INTEGER PRIMARY KEY,
+    last_sent_date TEXT
+)
+""")
+
 connect.commit()
 
 # ==== FUNKSIYALAR ====
@@ -100,10 +107,14 @@ def get_active_posts():
     """).fetchall()
 
 # Postni "sent" sifatida belgilash
+# Postni bugungi sana bilan yuborilgan sifatida belgilash
 def mark_post_as_sent(post_id):
+    from datetime import datetime
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    
     cursor.execute("""
-    UPDATE active_posts SET status = 'sent' WHERE id = ?
-    """, (post_id,))
+    INSERT OR REPLACE INTO post_history (post_id, last_sent_date) VALUES (?, ?)
+    """, (post_id, current_date))
     connect.commit()
 
 

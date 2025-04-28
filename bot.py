@@ -15,23 +15,24 @@ import os
 
 load_dotenv()
 
-# TOKEN = os.getenv("TOKEN")
-# ADMINS = os.getenv("ADMINS").split(",")  # ['6812498519', '2122893555']
+TOKEN = os.getenv("TOKEN")
+ADMINS = os.getenv("ADMINS").split(",")  # ['6812498519', '2122893555']
 
 
-TOKEN = "7581959377:AAEhAfvaMyNKQtB5eGnkGWSeFiAryXb5IZU"
-ADMINS = ["6812498519"]
+# TOKEN = "7581959377:AAEhAfvaMyNKQtB5eGnkGWSeFiAryXb5IZU"
+# ADMINS = ["6812498519"]
 
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
 class PostState(StatesGroup):
-    waiting_for_post_type = State()  # Yangi state: post turi (forward yoki qo'lda)
-    forward_post = State()          # Forward post uchun state
-    manual_post = State()           # Qo'lda kiritish uchun state
+    choice = State()  # Forward yoki Qolda tanlovi
+    forward = State()  # Forward tanlansa
+    photo = State()    # Qolda rasm yuklash
     caption = State()
-    photo = State()
+    shablon = State()
+
 
 class ElonState(StatesGroup):
     photo = State()
@@ -42,14 +43,20 @@ class UpdateTimeState(StatesGroup):
     waiting_for_new_time = State()
 
 # Buttonlar
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from aiogram.types import InputMediaPhoto, InputMediaVideo
-
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 btn_start = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📮Post jo`natish"), KeyboardButton(text="🧾Elon qo`shish")],
-        [KeyboardButton(text="/posts"), KeyboardButton(text="/groups")]
+        [KeyboardButton(text="📑 Postlar ➡️"), KeyboardButton(text="👥 Guruhlar 🗣")]
+    ],
+    resize_keyboard=True
+)
+
+posts_btn = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="🔄 Forward qilish"), KeyboardButton(text="✍️ Qo'lda kiritish")],
+        [KeyboardButton(text="❌ Bekor qilish")]
     ],
     resize_keyboard=True
 )
@@ -59,86 +66,17 @@ btn_cancel = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-btn_post_type = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="🔄 Forward qilish"), KeyboardButton(text="✍️ Qo'lda kiritish")],
-        [KeyboardButton(text="❌ Bekor qilish")]
-    ],
-    resize_keyboard=True
-)
-
 FORBIDDEN_TEXTS = [
     "📮Post jo`natish", "🧾Elon qo`shish", "❌ Bekor qilish",
     "/start", "/posts", "/groups", "🔄 Forward qilish", "✍️ Qo'lda kiritish"
 ]
+
 # Admin ekanligini tekshirish
 def is_admin(user_id):
     return str(user_id) in ADMINS
 
 async def admin_filter(message: types.Message):
     return is_admin(message.from_user.id)
-
-
-media_groups = {}
-
-async def process_media_group(media_group_id, user_id, is_forwarded=False):
-    """Process collected media group after a short delay"""
-    await asyncio.sleep(1.5)  # Wait for all media in the group to arrive
-    
-    if media_group_id not in media_groups:
-        return
-        
-    media_data = media_groups.pop(media_group_id)
-    messages = media_data['messages']
-    
-    if not messages:
-        return
-    
-    # Get caption from first message if available
-    caption = messages[0].caption or ""
-    
-    # Create media group
-    media = []
-    for msg in messages:
-        if msg.photo:
-            media.append(InputMediaPhoto(
-                media=msg.photo[-1].file_id, 
-                caption=caption if len(media) == 0 else None
-            ))
-        elif msg.video:
-            media.append(InputMediaVideo(
-                media=msg.video.file_id, 
-                caption=caption if len(media) == 0 else None
-            ))
-    
-    # Get all active groups
-    groups = cursor.execute("SELECT group_id, group_name, joined_date FROM active_groups").fetchall()
-    
-    if not groups:
-        await bot.send_message(
-            chat_id=user_id, 
-            text="❌ Hech qanday aktiv guruh topilmadi.",
-            reply_markup=btn_start
-        )
-        return
-    
-    # Send to all groups
-    sent_count = 0
-    for group in groups:
-        group_id, group_name, _ = group
-        try:
-            await bot.send_media_group(chat_id=group_id, media=media)
-            sent_count += 1
-        except Exception as e:
-            print(f"⚠️ {group_name} ({group_id}) ga media yuborishda xato: {e}")
-    
-    # Notify admin about success
-    await bot.send_message(
-        chat_id=user_id,
-        text=f"📢 {sent_count} ta guruhga {'forward qilingan' if is_forwarded else ''} media group jo'natildi!",
-        reply_markup=btn_start
-    )
-
 
 @dp.message_handler(lambda message: message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and 
                     message.text and (any(text in message.text for text in FORBIDDEN_TEXTS) or message.text.startswith("/start@")))
@@ -180,7 +118,7 @@ async def start_handler(message: types.Message):
     else:
         return
     
-@dp.message_handler(commands=["posts"])
+@dp.message_handler(text="📑 Postlar ➡️")
 async def show_posts(message: types.Message):
     if not is_admin(message.from_user.id):
         return
@@ -249,7 +187,7 @@ async def show_posts(message: types.Message):
                     reply_markup=inline_kb
                 )
 
-@dp.message_handler(commands=["groups"])
+@dp.message_handler(text="👥 Guruhlar 🗣")
 async def show_groups(message: types.Message):
     if not is_admin(message.from_user.id):
         return
@@ -431,90 +369,160 @@ async def main_menu(callback_query: types.CallbackQuery):
 
 # 📮 Post jo'natish tugmasi bosilganda
 @dp.message_handler(lambda message: message.text == "📮Post jo`natish")
-async def ask_for_post_photo(message: types.Message):
+async def ask_for_post_type(message: types.Message):
     if not is_admin(message.from_user.id):
         return
-        
-    await message.answer("📤 Iltimos, post uchun rasm/video yuboring yoki kanaldan xabarni forward qiling:", reply_markup=btn_cancel)
-    await PostState.photo.set()
 
-@dp.message_handler(content_types=[types.ContentType.PHOTO, types.ContentType.VIDEO], state=PostState.photo)
-async def get_post_media(message: types.Message, state: FSMContext):
+    await message.answer("Postni qanday yubormoqchisiz?", reply_markup=posts_btn)
+    await PostState.choice.set()
+
+@dp.message_handler(lambda message: message.text in ["🔄 Forward qilish", "✍️ Qo'lda kiritish"], state=PostState.choice)
+async def handle_post_choice(message: types.Message, state: FSMContext):
+    if message.text == "🔄 Forward qilish":
+        await message.answer("📨 Kanaldan xabarni forward qiling:")
+        await PostState.forward.set()
+    elif message.text == "✍️ Qo'lda kiritish":
+        await message.answer("📤 Iltimos, post uchun rasm yuboring:", reply_markup=btn_cancel)
+        await PostState.photo.set()
+
+@dp.message_handler(lambda m: m.media_group_id is not None, state=PostState.forward,
+                    content_types=types.ContentTypes.ANY)
+async def handle_forwarded_media_group(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
         
-    # Handle media group (multiple photos/videos)
-    if message.media_group_id:
-        media_group_id = message.media_group_id
-        is_forwarded = bool(message.forward_from_chat)
-        
-        # Store this message in the media_groups dictionary
-        if media_group_id not in media_groups:
-            media_groups[media_group_id] = {
-                'messages': [],
-                'timer': None,
-                'processed': False
-            }
-        
-        media_groups[media_group_id]['messages'].append(message)
-        
-        # Cancel existing timer if any
-        if media_groups[media_group_id]['timer'] and not media_groups[media_group_id]['timer'].done():
-            media_groups[media_group_id]['timer'].cancel()
-        
-        # Create a new timer to process this media group
-        loop = asyncio.get_event_loop()
-        media_groups[media_group_id]['timer'] = loop.create_task(
-            process_media_group(media_group_id, message.from_user.id, is_forwarded)
-        )
-        
-        # Keep state active until processing is done
+    if not message.forward_from_chat:
+        await message.answer("❌ Bu forward qilingan xabar emas. Iltimos, kanaldan xabarni forward qiling:", reply_markup=btn_cancel)
         return
     
-    # Handle single photo/video
-    if message.photo:
-        file_id = message.photo[-1].file_id
-        await state.update_data(media_type='photo', media_id=file_id)
-    elif message.video:
-        file_id = message.video.file_id
-        await state.update_data(media_type='video', media_id=file_id)
+    # Store media group messages and process them after a delay
+    post_media_groups[message.media_group_id].append(message)
+    if message.media_group_id in post_tasks:
+        post_tasks[message.media_group_id].cancel()
     
-    # If forwarded, send immediately
-    if message.forward_from_chat:
-        caption = message.caption or ""
-        data = await state.get_data()
-        media_type = data.get('media_type')
-        media_id = data.get('media_id')
+    post_tasks[message.media_group_id] = asyncio.create_task(
+        process_forwarded_media_group(message.media_group_id, message, state)
+    )
+
+async def process_forwarded_media_group(media_group_id, sample_msg, state):
+    try:
+        # Wait to collect all media group messages
+        await asyncio.sleep(1.5)
+        messages = post_media_groups.pop(media_group_id, [])
+        post_tasks.pop(media_group_id, None)
         
-        # Get all groups
+        if not messages:
+            return
+            
+        # Get the caption from the first message
+        caption = messages[0].caption or ""
+        
+        # Create media group
+        media = []
+        for msg in messages:
+            if msg.photo:
+                media.append(InputMediaPhoto(media=msg.photo[-1].file_id, caption=caption if not media else None))
+            elif msg.video:
+                media.append(InputMediaVideo(media=msg.video.file_id, caption=caption if not media else None))
+        
+        # Get all groups from database
         groups = cursor.execute("SELECT group_id, group_name, joined_date FROM active_groups").fetchall()
         
-        if groups:
-            sent_count = 0
-            for group in groups:
-                group_id, group_name, _ = group
-                try:
-                    if media_type == 'photo':
-                        await bot.send_photo(chat_id=group_id, photo=media_id, caption=caption)
-                    elif media_type == 'video':
-                        await bot.send_video(chat_id=group_id, video=media_id, caption=caption)
-                    sent_count += 1
-                except Exception as e:
-                    print(f"⚠️ {group_name} ({group_id}) ga jo'natib bo'lmadi: {e}")
-            
-            media_type_name = "rasm" if media_type == 'photo' else "video"
-            await message.answer(
-                f"📢 {sent_count} ta guruhga forward qilingan {media_type_name} jo'natildi!", 
-                reply_markup=btn_start
-            )
-        else:
-            await message.answer("❌ Hech qanday aktiv guruh topilmadi.", reply_markup=btn_start)
+        if not groups:
+            await sample_msg.answer("❌ Hech qanday aktiv guruh topilmadi.", reply_markup=btn_start)
+            await state.finish()
+            return
         
+        sent_count = 0
+        for group in groups:
+            group_id = group[0]
+            try:
+                # Send the media group to each chat
+                await bot.send_media_group(chat_id=group_id, media=media)
+                sent_count += 1
+            except Exception as e:
+                print(f"⚠️ {group[1]} ({group_id}) ga media group jo'natib bo'lmadi: {e}")
+        
+        await sample_msg.answer(f"📢 {sent_count} ta guruhga forward qilingan media group jo'natildi!", reply_markup=btn_start)
         await state.finish()
-    else:
-        # Ask for caption for manual uploads
-        await message.answer("✍️ Endi post uchun izoh (caption) yuboring:", reply_markup=btn_cancel)
-        await PostState.caption.set()
+    except asyncio.CancelledError:
+        pass
+
+@dp.message_handler(state=PostState.forward, content_types=types.ContentTypes.ANY)
+async def handle_forwarded_message(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    
+    # Skip if it's part of a media group (handled by another handler)
+    if message.media_group_id is not None:
+        return
+        
+    if not message.forward_from_chat:
+        await message.answer("❌ Bu forward qilingan xabar emas. Iltimos, kanaldan xabarni forward qiling:", reply_markup=btn_cancel)
+        return
+    
+    # Get all groups from database
+    groups = cursor.execute("SELECT group_id, group_name, joined_date FROM active_groups").fetchall()
+    
+    if not groups:
+        await message.answer("❌ Hech qanday aktiv guruh topilmadi.", reply_markup=btn_start)
+        await state.finish()
+        return
+    
+    sent_count = 0
+    for group in groups:
+        group_id, group_name, joined_date = group
+        try:
+            # Forward the same content type
+            if message.photo:
+                await bot.send_photo(
+                    chat_id=group_id, 
+                    photo=message.photo[-1].file_id, 
+                    caption=message.caption
+                )
+            elif message.video:
+                await bot.send_video(
+                    chat_id=group_id, 
+                    video=message.video.file_id, 
+                    caption=message.caption
+                )
+            elif message.text:
+                await bot.send_message(
+                    chat_id=group_id, 
+                    text=message.text
+                )
+            elif message.animation:
+                await bot.send_animation(
+                    chat_id=group_id, 
+                    animation=message.animation.file_id, 
+                    caption=message.caption
+                )
+            elif message.audio:
+                await bot.send_audio(
+                    chat_id=group_id, 
+                    audio=message.audio.file_id, 
+                    caption=message.caption
+                )
+            elif message.document:
+                await bot.send_document(
+                    chat_id=group_id, 
+                    document=message.document.file_id, 
+                    caption=message.caption
+                )
+            elif message.voice:
+                await bot.send_voice(
+                    chat_id=group_id, 
+                    voice=message.voice.file_id, 
+                    caption=message.caption
+                )
+            sent_count += 1
+        except Exception as e:
+            print(f"⚠️ {group_name} ({group_id}) ga jo'natib bo'lmadi: {e}")
+    
+    await message.answer(f"📢 {sent_count} ta guruhga forward qilingan post jo'natildi!", reply_markup=btn_start)
+    await state.finish()
+
+
 
 # 🧾 Elon qo'shish tugmasi bosilganda
 @dp.message_handler(lambda message: message.text == "🧾Elon qo`shish")
@@ -542,69 +550,25 @@ async def get_post_caption(message: types.Message, state: FSMContext):
         
     caption = message.text
     data = await state.get_data()
-    media_type = data.get('media_type')
-    media_id = data.get('media_id')
-    
-    # Get all groups
-    groups = cursor.execute("SELECT group_id, group_name, joined_date FROM active_groups").fetchall()
-    
-    if groups:
-        sent_count = 0
-        for group in groups:
-            group_id, group_name, _ = group
-            try:
-                if media_type == 'photo':
-                    await bot.send_photo(chat_id=group_id, photo=media_id, caption=caption)
-                elif media_type == 'video':
-                    await bot.send_video(chat_id=group_id, video=media_id, caption=caption)
-                sent_count += 1
-            except Exception as e:
-                print(f"⚠️ {group_name} ({group_id}) ga jo'natib bo'lmadi: {e}")
-        
-        media_type_name = "rasm" if media_type == 'photo' else "video"
-        await message.answer(
-            f"📢 {sent_count} ta guruhga {media_type_name} bilan post jo'natildi!",
-            reply_markup=btn_start
-        )
-    else:
-        await message.answer("❌ Hech qanday aktiv guruh topilmadi.", reply_markup=btn_start)
-    
-    await state.finish()
+    photo_id = data.get("photo")
 
-@dp.message_handler(state=PostState.photo, content_types=types.ContentType.TEXT)
-async def process_text_post(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    
-    text = message.text
-    
-    # Handle cancel button
-    if text == "❌ Bekor qilish":
-        await message.answer("❌ Post jo'natish bekor qilindi.", reply_markup=btn_start)
-        await state.finish()
-        return
-    
-    # Send text message to all groups
+    # Bazadan barcha guruhlarni olish
     groups = cursor.execute("SELECT group_id, group_name, joined_date FROM active_groups").fetchall()
-    
+
     if groups:
         sent_count = 0
         for group in groups:
-            group_id, group_name, _ = group
+            group_id, group_name, joined_date = group
             try:
-                await bot.send_message(chat_id=group_id, text=text)
+                await bot.send_photo(chat_id=group_id, photo=photo_id, caption=caption)
                 sent_count += 1
             except Exception as e:
                 print(f"⚠️ {group_name} ({group_id}) ga jo'natib bo'lmadi: {e}")
-        
-        forward_text = "forward qilingan " if message.forward_from_chat else ""
-        await message.answer(
-            f"📢 {sent_count} ta guruhga {forward_text}matnli post jo'natildi!",
-            reply_markup=btn_start
-        )
+
+        await message.answer(f"📢 {sent_count} ta guruhga rasm bilan post jo'natildi!", reply_markup=btn_start)
     else:
         await message.answer("❌ Hech qanday aktiv guruh topilmadi.", reply_markup=btn_start)
-    
+
     await state.finish()
 
 # E'lon uchun rasmni qabul qilish
@@ -819,41 +783,38 @@ async def send_scheduled_posts():
                 print(f"📊 E'lon #{post_id} {sent_count} ta guruhga yuborildi")
                 
                 # Bu e'lon oxirgi yuborilgan sanasini yangilash
-                cursor.execute(
-                    "INSERT OR REPLACE INTO post_history (post_id, last_sent_date) VALUES (?, ?)",
-                    (post_id, current_date)
-                )
-                connect.commit()
-                
+                mark_post_as_sent(post_id)
+
+
 async def verify_bot_in_groups():
     groups = cursor.execute("SELECT group_id, group_name FROM active_groups").fetchall()
     for group in groups:
         group_id, group_name = group
-        
+
         try:
             chat_member = await bot.get_chat_member(group_id, (await bot.get_me()).id)
             if chat_member.status == "left" or chat_member.status == "kicked":
                 cursor.execute("DELETE FROM active_groups WHERE group_id = ?", (group_id,))
                 connect.commit()
-                
+
                 for admin_id in ADMINS:
                     try:
                         await bot.send_message(
-                            admin_id, 
+                            admin_id,
                             f"⚠️ Bot {group_name} ({group_id}) guruhida topilmadi!\n"
                             f"✅ Guruh ma'lumotlari bazadan o'chirildi."
                         )
                     except Exception as e:
                         print(f"Admin {admin_id}ga xabar yuborib bo'lmadi: {e}")
-                        
+
         except Exception as e:
             cursor.execute("DELETE FROM active_groups WHERE group_id = ?", (group_id,))
             connect.commit()
-            
+
             for admin_id in ADMINS:
                 try:
                     await bot.send_message(
-                        admin_id, 
+                        admin_id,
                         f"⚠️ Bot {group_name} ({group_id}) guruhiga kira olmadi: {str(e)}\n"
                         f"✅ Guruh ma'lumotlari bazadan o'chirildi."
                     )
@@ -876,11 +837,12 @@ async def scheduler():
             
         await asyncio.sleep(60)
 
+
 @dp.message_handler(content_types=types.ContentType.NEW_CHAT_MEMBERS)
 async def join_group(message: types.Message):
     # Bot o'zi qo'shilganligini tekshirish
     bot_info = await bot.get_me()
-    
+
     for new_member in message.new_chat_members:
         if new_member.id == bot_info.id:
             group_id = str(message.chat.id)
@@ -889,16 +851,16 @@ async def join_group(message: types.Message):
 
             # Guruh bor yoki yo'qligini tekshirish
             select = cursor.execute("SELECT group_id FROM active_groups WHERE group_id=?", (group_id,)).fetchone()
-            
+
             if select:
-                cursor.execute("UPDATE active_groups SET group_name=?, joined_date=? WHERE group_id=?", 
+                cursor.execute("UPDATE active_groups SET group_name=?, joined_date=? WHERE group_id=?",
                                (group_name, joined_date, group_id))
             else:
                 cursor.execute("INSERT INTO active_groups (group_id, group_name, joined_date) VALUES (?, ?, ?)",
                                (group_id, group_name, joined_date))
 
             connect.commit()
-            
+
             # Faqat admin uchun xabar yuborish
             for admin_id in ADMINS:
                 try:
@@ -906,18 +868,21 @@ async def join_group(message: types.Message):
                     added_by_user = message.from_user
                     added_by_name = added_by_user.full_name if added_by_user else "Noma'lum foydalanuvchi"
                     added_by_id = added_by_user.id if added_by_user else "Noma'lum ID"
-                    
+
                     # Check if the user who added the bot is an admin
                     is_user_admin = is_admin(added_by_id)
                     user_status = "admin" if is_user_admin else "oddiy foydalanuvchi"
-                    
+
                     await bot.send_message(
-                        admin_id, 
+                        admin_id,
                         f"✅ Bot yangi guruhga qo'shildi: {group_name} ({group_id})\n"
                         f"👤 Qo'shgan: {added_by_name} ({added_by_id}) - {user_status}"
                     )
                 except Exception as e:
                     print(f"Admin {admin_id}ga xabar yuborib bo'lmadi: {e}")
+
+
+
 
 from aiogram.types import InputMediaPhoto, InputMediaVideo
 from collections import defaultdict
@@ -929,48 +894,48 @@ post_tasks = {}
 elon_tasks = {}
 
 # ==== POST ====
-# @dp.message_handler(lambda m: m.media_group_id is not None, state=PostState.photo,
-#                     content_types=types.ContentTypes.ANY)
-# async def handle_post_media_group(message: types.Message, state: FSMContext):
-#     if not is_admin(message.from_user.id):
-#         return
+@dp.message_handler(lambda m: m.media_group_id is not None, state=PostState.photo,
+                    content_types=types.ContentTypes.ANY)
+async def handle_post_media_group(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
 
-#     post_media_groups[message.media_group_id].append(message)
-#     if message.media_group_id in post_tasks:
-#         post_tasks[message.media_group_id].cancel()
+    post_media_groups[message.media_group_id].append(message)
+    if message.media_group_id in post_tasks:
+        post_tasks[message.media_group_id].cancel()
 
-#     post_tasks[message.media_group_id] = asyncio.create_task(
-#         process_post_media_group(message.media_group_id, message, state)
-#     )
+    post_tasks[message.media_group_id] = asyncio.create_task(
+        process_post_media_group(message.media_group_id, message, state)
+    )
 
-# async def process_post_media_group(media_group_id, sample_msg, state):
-#     try:
-#         await asyncio.sleep(1.5)
-#         messages = post_media_groups.pop(media_group_id, [])
-#         post_tasks.pop(media_group_id, None)
+async def process_post_media_group(media_group_id, sample_msg, state):
+    try:
+        await asyncio.sleep(1.5)
+        messages = post_media_groups.pop(media_group_id, [])
+        post_tasks.pop(media_group_id, None)
 
-#         if not messages:
-#             return
+        if not messages:
+            return
 
-#         caption = messages[0].caption or ""
-#         media = []
-#         for msg in messages:
-#             if msg.photo:
-#                 media.append(InputMediaPhoto(media=msg.photo[-1].file_id, caption=caption if not media else None))
-#             elif msg.video:
-#                 media.append(InputMediaVideo(media=msg.video.file_id, caption=caption if not media else None))
+        caption = messages[0].caption or ""
+        media = []
+        for msg in messages:
+            if msg.photo:
+                media.append(InputMediaPhoto(media=msg.photo[-1].file_id, caption=caption if not media else None))
+            elif msg.video:
+                media.append(InputMediaVideo(media=msg.video.file_id, caption=caption if not media else None))
 
-#         groups = cursor.execute("SELECT group_id FROM active_groups").fetchall()
-#         for group in groups:
-#             try:
-#                 await bot.send_media_group(chat_id=group[0], media=media)
-#             except Exception as e:
-#                 print(f"POST media_group {group[0]}ga yuborilmadi: {e}")
+        groups = cursor.execute("SELECT group_id FROM active_groups").fetchall()
+        for group in groups:
+            try:
+                await bot.send_media_group(chat_id=group[0], media=media)
+            except Exception as e:
+                print(f"POST media_group {group[0]}ga yuborilmadi: {e}")
 
-#         await sample_msg.answer(f"📢 {len(groups)} ta guruhga media group post yuborildi!", reply_markup=btn_start)
-#         await state.finish()
-#     except asyncio.CancelledError:
-#         pass
+        await sample_msg.answer(f"📢 {len(groups)} ta guruhga media group post yuborildi!", reply_markup=btn_start)
+        await state.finish()
+    except asyncio.CancelledError:
+        pass
 
 
 @dp.message_handler(lambda m: m.media_group_id is not None, state=ElonState.photo,
