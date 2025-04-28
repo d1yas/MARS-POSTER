@@ -16,11 +16,8 @@ import os
 load_dotenv()
 
 TOKEN = os.getenv("TOKEN")
-ADMINS = os.getenv("ADMINS").split(",")  # ['6812498519', '2122893555']
+ADMINS = os.getenv("ADMINS").split(",")  
 
-
-# TOKEN = "7581959377:AAEhAfvaMyNKQtB5eGnkGWSeFiAryXb5IZU"
-# ADMINS = ["6812498519"]
 
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
